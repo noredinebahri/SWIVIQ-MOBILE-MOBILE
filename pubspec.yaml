@@ -1,0 +1,45 @@
+name: oxygene_mobile
+description: "Centre Oxygène — application mobile de gestion du centre."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.7.0
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.6.2
+  flutter_secure_storage: ^9.2.2
+  google_fonts: ^6.2.1
+  jwt_decoder: ^2.0.1
+  intl: ^0.20.1
+  flutter_local_notifications: ^18.0.1
+  workmanager: ^0.10.7
+  shared_preferences: ^2.3.4
+  path_provider: ^2.1.4
+  share_plus: ^10.1.2
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.2
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # iOS refuse toute transparence dans l'icône de l'App Store.
+  remove_alpha_ios: true
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/logo.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/

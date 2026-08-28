@@ -1,0 +1,100 @@
+# Compilation iOS dans le cloud (macOS) — aucun Mac requis en local.
+#
+# Pourquoi ce fichier : Apple interdit techniquement de compiler une app iOS
+# ailleurs que sur macOS. Codemagic loue des machines macOS à la demande ;
+# on y pousse ce dépôt et il rend un .ipa signé, prêt pour TestFlight puis
+# l'App Store.
+#
+# Mise en route (une seule fois) :
+#   1. codemagic.io → connecter le dépôt du projet ;
+#   2. Teams ▸ Integrations ▸ Apple Developer Portal : connecter le compte
+#      Apple (App Store Connect API key) ;
+#   3. lancer le workflow « ios-release ».
+#
+# Deux voies :
+#   • ios-unsigned  → gratuit, .ipa à installer par sideloading (7 jours) ;
+#   • ios-release   → compte Apple 99 $/an, TestFlight puis App Store.
+
+workflows:
+  # ── App iOS SANS compte Apple payant ──────────────────────────────────
+  #
+  # Produit un .ipa NON SIGNÉ. Il ne s'installe pas d'un simple clic comme un
+  # APK : le testeur le « sideload » depuis un ordinateur avec Sideloadly ou
+  # AltStore, qui le resigne avec son propre identifiant Apple gratuit.
+  # L'app fonctionne alors 7 jours, puis doit être resignée (AltStore le fait
+  # tout seul en Wi-Fi). C'est la seule voie gratuite : Apple n'autorise
+  # aucune installation directe d'un fichier non signé.
+  ios-unsigned:
+    name: iOS — .ipa non signé (sideloading)
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Récupération des dépendances
+        script: flutter pub get
+      - name: Analyse statique
+        script: flutter analyze
+      - name: Build iOS sans signature
+        script: flutter build ios --release --no-codesign
+      - name: Empaquetage en .ipa
+        script: |
+          # Un .ipa est simplement une archive ZIP contenant Payload/<App>.app.
+          # Xcode ne le génère pas sans signature : on le fabrique à la main.
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -r Runner.app Payload/
+          zip -r9 CentreOxygene-unsigned.ipa Payload > /dev/null
+          echo "IPA prêt : $(du -h CentreOxygene-unsigned.ipa | cut -f1)"
+    artifacts:
+      - build/ios/iphoneos/*.ipa
+      - flutter_drive.log
+
+  # ── Distribution : app signée pour TestFlight / App Store ─────────────
+  ios-release:
+    name: iOS — publication TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      # Nom de l'intégration créée dans Codemagic (Teams ▸ Integrations).
+      app_store_connect: OxygeneAppStore
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.oxygene.oxygeneMobile
+      vars:
+        BUNDLE_ID: com.oxygene.oxygeneMobile
+    scripts:
+      - name: Récupération des dépendances
+        script: flutter pub get
+      - name: Profils de signature
+        script: |
+          # Codemagic récupère (ou crée) les certificats depuis le compte
+          # Apple connecté : rien à installer à la main.
+          xcode-project use-profiles
+      - name: Numéro de build incrémental
+        script: |
+          # App Store Connect refuse deux envois avec le même numéro.
+          BUILD_NUMBER=$(($(app-store-connect get-latest-testflight-build-number "$APP_APPLE_ID" 2>/dev/null || echo 0) + 1))
+          echo "Numéro de build : $BUILD_NUMBER"
+          flutter build ipa --release \
+            --build-name=1.0.0 \
+            --build-number=$BUILD_NUMBER \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Envoi automatique sur TestFlight : les testeurs internes du centre
+        # reçoivent la version dès la fin du build.
+        submit_to_testflight: true
+        # Passage en revue App Store déclenché manuellement : on garde la
+        # main sur ce qui part au public.
+        submit_to_app_store: false
