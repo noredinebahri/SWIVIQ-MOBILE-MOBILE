@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
 import '../../core/api/api_client.dart';
+import '../../core/auth/auth_providers.dart';
 import '../../core/config/center_config.dart';
+import '../student_portal/student_portal_repo.dart';
 
 /// Premier lancement de l'app marque blanche : l'utilisateur saisit le code
 /// de son centre (remis par le centre, en général sur le reçu d'inscription
@@ -42,6 +44,12 @@ class _CenterSetupScreenState extends ConsumerState<CenterSetupScreen> {
     try {
       final config =
           await ref.read(centerConfigProvider.notifier).adopt(code);
+      // Saisir un code = nouvelle mise en service de l'appareil : aucune
+      // session antérieure (personnel ou élève, même d'un autre centre) ne
+      // doit survivre. Le code du centre est public ; ce sont les identifiants
+      // saisis ENSUITE qui ouvrent un espace.
+      await ref.read(authProvider.notifier).logoutSilently();
+      await ref.read(studentAuthProvider.notifier).logout();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Bienvenue au centre ${config.name} !')),
