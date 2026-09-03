@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:math';
 import 'dart:ui' show Color;
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -103,16 +104,68 @@ class NotificationService {
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
+  // ───────────── Cadence du poll en avant-plan ─────────────
+  //
+  // Pas de Timer.periodic figé à 60 s : chaque cycle se replanifie lui-même
+  // avec une gigue de ±20 % (des centaines de téléphones ne frappent pas le
+  // serveur à la même seconde), l'intervalle double à chaque échec réseau
+  // (jusqu'à 10 min) et revient à la normale au premier succès. En arrière-
+  // plan (app masquée), le poll s'arrête : WorkManager prend le relais.
+  static const _baseInterval = Duration(seconds: 90);
+  static const _maxInterval = Duration(minutes: 10);
+  Duration _currentInterval = _baseInterval;
+  bool _watching = false;
+  bool _foreground = true;
+  bool _cycleRunning = false;
+  final _jitter = Random();
+
+  void _scheduleNext() {
+    _foregroundTimer?.cancel();
+    if (!_watching || !_foreground) return;
+    final ms = _currentInterval.inMilliseconds;
+    final delay = Duration(
+        milliseconds: (ms * (0.8 + _jitter.nextDouble() * 0.4)).round());
+    _foregroundTimer = Timer(delay, _runCycle);
+  }
+
+  Future<void> _runCycle() async {
+    if (_cycleRunning) return;
+    _cycleRunning = true;
+    try {
+      final ok = await checkNewRecords(notify: true);
+      _currentInterval = ok
+          ? _baseInterval
+          : Duration(
+              milliseconds: min(_currentInterval.inMilliseconds * 2,
+                  _maxInterval.inMilliseconds));
+    } finally {
+      _cycleRunning = false;
+      _scheduleNext();
+    }
+  }
+
+  /// Appelé par l'app au changement d'état (premier plan / arrière-plan).
+  void setForeground(bool foreground) {
+    if (_foreground == foreground) return;
+    _foreground = foreground;
+    if (foreground) {
+      // Retour au premier plan : vérification immédiate (l'utilisateur
+      // regarde), puis reprise de la cadence.
+      _currentInterval = _baseInterval;
+      if (_watching) unawaited(_runCycle());
+    } else {
+      _foregroundTimer?.cancel();
+    }
+  }
+
   /// Démarre le suivi pour l'utilisateur connecté (appelé après login).
   Future<void> startWatching() async {
-    _foregroundTimer?.cancel();
-    _foregroundTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => checkNewRecords(notify: true),
-    );
+    _watching = true;
+    _currentInterval = _baseInterval;
     // Amorce la mémoire des ids connus sans notifier (évite une rafale de
     // notifications au premier lancement).
     await checkNewRecords(notify: false);
+    _scheduleNext();
 
     // Tâche de fond : sur Android elle tourne toutes les ~15 min. Sur iOS,
     // `registerPeriodicTask` n'existe pas — le système décide seul du moment
@@ -141,6 +194,7 @@ class NotificationService {
   }
 
   Future<void> stopWatching() async {
+    _watching = false;
     _foregroundTimer?.cancel();
     _foregroundTimer = null;
     await Workmanager().cancelByUniqueName(_taskName);
@@ -150,21 +204,23 @@ class NotificationService {
   }
 
   /// Compare l'état serveur aux ids déjà vus et notifie les nouveautés.
-  Future<void> checkNewRecords({required bool notify}) async {
+  /// Retourne `false` si le réseau ou le serveur a fait défaut (la cadence
+  /// du poll s'espace alors).
+  Future<bool> checkNewRecords({required bool notify}) async {
     try {
       final token = await TokenStore.read();
-      if (token == null) return;
+      if (token == null) return true;
 
       // Élève connecté : on surveille sa version d'emploi du temps, rien
       // d'autre (son jeton n'ouvre pas les écrans du personnel).
       final student = StudentSession.fromToken(token);
       if (student != null) {
-        if (notify) await _checkStudentSchedule();
-        return;
+        if (notify) return _checkStudentSchedule();
+        return true;
       }
 
       final user = SessionUser.fromToken(token);
-      if (user == null) return;
+      if (user == null) return true;
 
       // Direction : notification du soir « élèves qui paient demain ».
       if (user.isAdmin && notify) {
@@ -198,7 +254,7 @@ class NotificationService {
       await prefs.setStringList(_knownIdsKey, knownValidated.toList());
       await prefs.setStringList(_knownPendingKey, knownAll.toList());
 
-      if (!notify) return;
+      if (!notify) return true;
 
       // Solde officiel du mois (moteur de paie serveur) pour enrichir la
       // notification de validation : « votre solde sera XX DH ce mois ».
@@ -237,26 +293,70 @@ class NotificationService {
               '${r.levelName ?? 'Séance'} · ${r.recordTime} min — en attente de validation.',
         );
       }
+      return true;
     } catch (_) {
       // Réseau indisponible : on retentera au prochain cycle.
+      return false;
     }
   }
 
   /// Nouvelle version d'emploi du temps publiée ? Remplace la copie locale
   /// et prévient l'élève — y compris quand l'app est fermée (WorkManager).
-  Future<void> _checkStudentSchedule() async {
+  ///
+  /// Un seul appel léger (`/pulse`, ~100 octets, mis en cache côté serveur)
+  /// dit si quelque chose a changé ; l'emploi du temps complet et la liste
+  /// des polycopiés ne sont rechargés QUE si leur version diffère de la
+  /// copie locale. Avant : deux réponses complètes par cycle et par
+  /// téléphone, pour ne rien apprendre 99 fois sur 100.
+  Future<bool> _checkStudentSchedule() async {
+    ({String? schedule, String? polycopies}) pulse;
+    try {
+      pulse = await StudentPortalRepo.pulse();
+    } on ApiException catch (e) {
+      // Serveur ancien sans /pulse : on retombe sur les appels complets.
+      if (e.statusCode != 404) return false;
+      return _checkStudentScheduleFull();
+    } catch (_) {
+      return false;
+    }
+
+    var ok = true;
+    try {
+      final local = await StudentPortalRepo.cachedScheduleVersion();
+      if (pulse.schedule != null && pulse.schedule != local) {
+        final result = await StudentPortalRepo.fetchSchedule();
+        if (result.changed) await notifyScheduleUpdated();
+      }
+    } catch (_) {
+      ok = false;
+    }
+    try {
+      final local = await StudentPortalRepo.cachedPolycopiesVersion();
+      if (pulse.polycopies != null && pulse.polycopies != local) {
+        final polys = await StudentPortalRepo.fetchPolycopies();
+        if (polys.changed) await notifyPolycopiesUpdated();
+      }
+    } catch (_) {
+      ok = false;
+    }
+    return ok;
+  }
+
+  Future<bool> _checkStudentScheduleFull() async {
+    var ok = true;
     try {
       final result = await StudentPortalRepo.fetchSchedule();
       if (result.changed) await notifyScheduleUpdated();
     } catch (_) {
-      // Hors-ligne : on retentera au prochain cycle.
+      ok = false;
     }
     try {
       final polys = await StudentPortalRepo.fetchPolycopies();
       if (polys.changed) await notifyPolycopiesUpdated();
     } catch (_) {
-      // Idem.
+      ok = false;
     }
+    return ok;
   }
 
   // ─────────── Notification « élèves qui paient demain » ───────────

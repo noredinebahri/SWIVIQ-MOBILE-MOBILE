@@ -37,6 +37,22 @@ class StudentPortalRepo {
     return Student.fromJson(Map<String, dynamic>.from(payload as Map));
   }
 
+  /// « Pouls » : les versions seules (emploi du temps, polycopiés). Réponse
+  /// minuscule, mise en cache 45 s côté serveur — c'est l'appel que le poll
+  /// répète, les données complètes ne sont chargées qu'au changement.
+  static Future<({String? schedule, String? polycopies})> pulse() async {
+    final data = await _api.get('/student/portal/pulse');
+    final map = data is Map ? data : const {};
+    return (
+      schedule: map['schedule']?.toString(),
+      polycopies: map['polycopies']?.toString(),
+    );
+  }
+
+  static Future<String?> cachedScheduleVersion() => ScheduleCache.readVersion();
+  static Future<String?> cachedPolycopiesVersion() =>
+      PolycopieCache.readVersion();
+
   /// Polycopiés DEPUIS LE SERVEUR, avec version. Écrit la copie hors-ligne
   /// et supprime les fichiers devenus obsolètes ou retirés à l'élève.
   /// `changed` = la liste ou un fichier a changé depuis la dernière fois.

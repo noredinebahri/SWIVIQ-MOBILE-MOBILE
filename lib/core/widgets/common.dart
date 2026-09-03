@@ -296,3 +296,87 @@ void showSnack(BuildContext context, String message, {bool error = false}) {
     backgroundColor: error ? AppColors.danger600 : AppColors.secondary800,
   ));
 }
+
+/// Bouton qui se verrouille pendant l'action asynchrone qu'il déclenche.
+///
+/// Un élève impatient touche trois fois « Enregistrer » : sans garde, trois
+/// requêtes partent, et le serveur reçoit trois scores, trois absences, trois
+/// paiements. Ici la deuxième touche est ignorée tant que la première n'est
+/// pas revenue, et le bouton le montre (spinner).
+class BusyButton extends StatefulWidget {
+  const BusyButton({
+    super.key,
+    required this.onPressed,
+    required this.child,
+    this.icon,
+    this.style,
+    this.outlined = false,
+  });
+
+  final Future<void> Function()? onPressed;
+  final Widget child;
+  final Widget? icon;
+  final ButtonStyle? style;
+  final bool outlined;
+
+  @override
+  State<BusyButton> createState() => _BusyButtonState();
+}
+
+class _BusyButtonState extends State<BusyButton> {
+  bool _busy = false;
+  DateTime? _lastTap;
+
+  Future<void> _handle() async {
+    // Double-tap physique (< 400 ms) : même sans action en cours, on ignore.
+    final now = DateTime.now();
+    if (_lastTap != null && now.difference(_lastTap!).inMilliseconds < 400) {
+      return;
+    }
+    _lastTap = now;
+    if (_busy || widget.onPressed == null) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onPressed!();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _busy
+        ? const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2.2),
+          )
+        : widget.child;
+    final onPressed = widget.onPressed == null || _busy ? null : _handle;
+    if (widget.outlined) {
+      return widget.icon != null && !_busy
+          ? OutlinedButton.icon(
+              onPressed: onPressed, icon: widget.icon!, label: label, style: widget.style)
+          : OutlinedButton(onPressed: onPressed, style: widget.style, child: label);
+    }
+    return widget.icon != null && !_busy
+        ? FilledButton.icon(
+            onPressed: onPressed, icon: widget.icon!, label: label, style: widget.style)
+        : FilledButton(onPressed: onPressed, style: widget.style, child: label);
+  }
+}
+
+/// Garde anti-rafale pour un callback quelconque (tuiles, icônes, lignes de
+/// liste) : la même action ne repart pas avant [window].
+class TapThrottle {
+  TapThrottle({this.window = const Duration(milliseconds: 500)});
+  final Duration window;
+  DateTime? _last;
+
+  bool get allowed {
+    final now = DateTime.now();
+    if (_last != null && now.difference(_last!) < window) return false;
+    _last = now;
+    return true;
+  }
+}
