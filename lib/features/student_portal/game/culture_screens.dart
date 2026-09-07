@@ -53,6 +53,30 @@ class CultureProgress {
     return map.values.fold<int>(0, (sum, v) => sum + v);
   }
 
+  /// Copie envoyée au serveur (progression sauvegardée).
+  static Future<Map<String, dynamic>> snapshot() async => {
+        'stars': await all(),
+        'bestTotal': await bestScore(),
+        'played': 0,
+      };
+
+  /// Fusion « le meilleur des deux » avec la copie du serveur.
+  static Future<void> merge(Map<String, dynamic> remote) async {
+    final prefs = await SharedPreferences.getInstance();
+    final map = await all();
+    final rs = remote['stars'];
+    if (rs is Map) {
+      rs.forEach((k, v) {
+        final n = int.tryParse(v.toString()) ?? 0;
+        if (n > (map[k.toString()] ?? 0)) map[k.toString()] = n;
+      });
+      await prefs.setStringList(
+          _key, map.entries.map((e) => '${e.key}=${e.value}').toList());
+    }
+    final rb = int.tryParse(remote['bestTotal']?.toString() ?? '') ?? 0;
+    if (rb > (prefs.getInt(_scoreKey) ?? 0)) await prefs.setInt(_scoreKey, rb);
+  }
+
   /// Le niveau 1 d'une œuvre est toujours ouvert : l'élève doit pouvoir
   /// réviser le roman qu'il étudie en ce moment, sans devoir finir les autres.
   static bool isUnlocked(Map<String, int> stars, int novelId, int level) =>
@@ -435,6 +459,8 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
         ));
       }
     }
+    // Progression (œuvres, étoiles) sauvegardée sur le serveur.
+    await GameArena.pushProgress('culture', await CultureProgress.snapshot());
     if (!mounted) return;
 
     final color = Color(widget.novel.color);

@@ -146,6 +146,30 @@ class GameArena {
     }
   }
 
+  /// Envoie la progression locale d'un jeu au serveur (fusionnée là-bas).
+  /// Ne lève jamais.
+  static Future<void> pushProgress(String game, Map<String, dynamic> snapshot) async {
+    try {
+      await _api.put('/student/portal/game/progress', data: {'game': game, ...snapshot});
+    } catch (_) {
+      // Hors-ligne : la prochaine manche renverra la copie complète.
+    }
+  }
+
+  /// Récupère la progression sauvegardée sur le serveur : { math, culture }
+  /// (null si absente). Ne lève jamais.
+  static Future<Map<String, Map<String, dynamic>?>> pullProgress() async {
+    try {
+      final data = await _api.get('/student/portal/game/progress');
+      final p = unwrap(data);
+      final map = p is Map ? Map<String, dynamic>.from(p) : <String, dynamic>{};
+      Map<String, dynamic>? pick(String k) => map[k] is Map ? Map<String, dynamic>.from(map[k]) : null;
+      return {'math': pick('math'), 'culture': pick('culture')};
+    } catch (_) {
+      return {'math': null, 'culture': null};
+    }
+  }
+
   /// Ouvre une manche depuis un écran de jeu : en cas d'attente ou de jeu
   /// fermé, explique et renvoie `null` (l'écran doit alors se fermer) ; hors
   /// ligne, prévient et renvoie `null` mais laisse jouer (`allowOffline`).

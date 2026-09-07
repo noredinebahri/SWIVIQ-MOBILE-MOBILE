@@ -5,6 +5,7 @@ import 'culture_screens.dart';
 import 'duel_screen.dart';
 import 'game_arena.dart';
 import 'game_map_screen.dart';
+import 'game_progress.dart';
 import 'leaderboard.dart';
 
 /// Menu des jeux de l'espace élève.
@@ -42,6 +43,14 @@ class _GameHubScreenState extends State<GameHubScreen> {
       if (!mounted) return;
       setState(() => _offline = true);
     }
+    // Progression sauvegardée sur le serveur (mondes, étoiles) : après une
+    // réinstallation ou sur un autre téléphone, l'élève retrouve tout.
+    final remote = await GameArena.pullProgress();
+    if (remote['math'] != null) await GameProgress.merge(remote['math']!);
+    if (remote['culture'] != null) await CultureProgress.merge(remote['culture']!);
+    // Et l'inverse : ce que le téléphone a de plus part au serveur.
+    await GameArena.pushProgress('math', await GameProgress.snapshot());
+    await GameArena.pushProgress('culture', await CultureProgress.snapshot());
   }
 
   bool _allowed(String id) => _config == null ? true : _config!.allows(id);

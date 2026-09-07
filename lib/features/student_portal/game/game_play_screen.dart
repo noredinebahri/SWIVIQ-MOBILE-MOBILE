@@ -160,6 +160,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         ));
       }
     }
+    // Progression (mondes, étoiles) sauvegardée sur le serveur.
+    await GameArena.pushProgress('math', await GameProgress.snapshot());
     if (!mounted) return;
     await _showResult(stars, improved, me);
   }

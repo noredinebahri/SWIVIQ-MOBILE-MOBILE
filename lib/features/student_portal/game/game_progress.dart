@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Progression du joueur, conservée sur l'appareil (aucun réseau requis).
+/// Progression du joueur, conservée sur l'appareil (aucun réseau requis)
+/// ET sauvegardée sur le serveur (voir GameArena.pushProgress /
+/// pullProgress) : une désinstallation ne remet plus l'élève à zéro.
 ///
 /// Clé : « stageId-level » → étoiles obtenues (0-3). Un niveau est débloqué
 /// si le précédent a au moins 1 étoile ; le premier niveau de chaque monde
@@ -71,6 +73,31 @@ class GameProgress {
   static Future<int> totalStars() async {
     final map = await _stars();
     return map.values.fold<int>(0, (sum, v) => sum + v);
+  }
+
+  /// Copie envoyée au serveur.
+  static Future<Map<String, dynamic>> snapshot() async => {
+        'stars': await _stars(),
+        'bestTotal': await bestScore(),
+        'played': await gamesPlayed(),
+      };
+
+  /// Fusion « le meilleur des deux » avec la copie du serveur.
+  static Future<void> merge(Map<String, dynamic> remote) async {
+    final prefs = await SharedPreferences.getInstance();
+    final map = await _stars();
+    final rs = remote['stars'];
+    if (rs is Map) {
+      rs.forEach((k, v) {
+        final n = int.tryParse(v.toString()) ?? 0;
+        if (n > (map[k.toString()] ?? 0)) map[k.toString()] = n;
+      });
+      await prefs.setString(_starsKey, jsonEncode(map));
+    }
+    final rb = int.tryParse(remote['bestTotal']?.toString() ?? '') ?? 0;
+    if (rb > (prefs.getInt(_bestKey) ?? 0)) await prefs.setInt(_bestKey, rb);
+    final rp = int.tryParse(remote['played']?.toString() ?? '') ?? 0;
+    if (rp > (prefs.getInt(_playedKey) ?? 0)) await prefs.setInt(_playedKey, rp);
   }
 
   /// Un niveau est jouable si c'est le tout premier, ou si le niveau
