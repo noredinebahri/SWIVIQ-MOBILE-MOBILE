@@ -164,9 +164,9 @@ class GameArena {
       final p = unwrap(data);
       final map = p is Map ? Map<String, dynamic>.from(p) : <String, dynamic>{};
       Map<String, dynamic>? pick(String k) => map[k] is Map ? Map<String, dynamic>.from(map[k]) : null;
-      return {'math': pick('math'), 'culture': pick('culture')};
+      return {'math': pick('math'), 'culture': pick('culture'), 'svt': pick('svt')};
     } catch (_) {
-      return {'math': null, 'culture': null};
+      return {'math': null, 'culture': null, 'svt': null};
     }
   }
 

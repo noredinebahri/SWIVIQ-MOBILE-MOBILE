@@ -7,6 +7,7 @@ import 'game_arena.dart';
 import 'game_map_screen.dart';
 import 'game_progress.dart';
 import 'leaderboard.dart';
+import 'svt_models.dart';
 
 /// Menu des jeux de l'espace élève.
 ///
@@ -48,9 +49,11 @@ class _GameHubScreenState extends State<GameHubScreen> {
     final remote = await GameArena.pullProgress();
     if (remote['math'] != null) await GameProgress.merge(remote['math']!);
     if (remote['culture'] != null) await CultureProgress.merge(remote['culture']!);
+    if (remote['svt'] != null) await CultureProgress.merge(remote['svt']!, game: 'svt');
     // Et l'inverse : ce que le téléphone a de plus part au serveur.
     await GameArena.pushProgress('math', await GameProgress.snapshot());
     await GameArena.pushProgress('culture', await CultureProgress.snapshot());
+    await GameArena.pushProgress('svt', await CultureProgress.snapshot(game: 'svt'));
   }
 
   bool _allowed(String id) => _config == null ? true : _config!.allows(id);
@@ -109,6 +112,33 @@ class _GameHubScreenState extends State<GameHubScreen> {
                 builder: (_) => Scaffold(
                   appBar: AppBar(title: const Text('Défi Lecture')),
                   body: const CultureMapScreen(),
+                ),
+              )),
+            ),
+          ],
+          if (_allowed('svt')) ...[
+            const SizedBox(height: 14),
+            _gameCard(
+              context,
+              emoji: '🧬',
+              title: 'Défi SVT',
+              subtitle: '2ᵉ Bac — 6 mondes, du facile à l\'expert',
+              detail: 'Libération de l\'énergie : ATP, glycolyse, mitochondrie, '
+                  'cycle de Krebs, chaîne respiratoire, fermentations, '
+                  'rendement et sujet type bac.',
+              colors: const [Color(0xFF059669), Color(0xFF34D399)],
+              gameId: 'svt',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => Scaffold(
+                  appBar: AppBar(title: const Text('Défi SVT')),
+                  body: CultureMapScreen(
+                    game: 'svt',
+                    title: 'Défi SVT',
+                    subtitle: 'Libération de l\'énergie — 2ᵉ Bac',
+                    emoji: '🧬',
+                    colors: const [Color(0xFF059669), Color(0xFF34D399)],
+                    novels: kSvtStages,
+                  ),
                 ),
               )),
             ),

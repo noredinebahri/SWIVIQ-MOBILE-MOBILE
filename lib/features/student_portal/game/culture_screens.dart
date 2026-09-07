@@ -9,13 +9,16 @@ import 'culture_models.dart';
 import 'game_arena.dart';
 import 'leaderboard.dart';
 
-/// Progression du jeu de culture (clés distinctes du jeu de calcul).
+/// Progression des jeux à questions (Défi Lecture « culture », Défi SVT
+/// « svt »…) : clés distinctes par jeu, `ox_<jeu>_stars` / `ox_<jeu>_score`
+/// (les clés historiques du Défi Lecture sont conservées telles quelles).
 class CultureProgress {
-  static const _key = 'ox_culture_stars';
+  static String _starsKey(String game) => 'ox_${game}_stars';
+  static String _scoreKeyOf(String game) => 'ox_${game}_score';
 
-  static Future<Map<String, int>> all() async {
+  static Future<Map<String, int>> all({String game = 'culture'}) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_key) ?? [];
+    final raw = prefs.getStringList(_starsKey(game)) ?? [];
     final map = <String, int>{};
     for (final entry in raw) {
       final parts = entry.split('=');
@@ -24,46 +27,44 @@ class CultureProgress {
     return map;
   }
 
-  static const _scoreKey = 'ox_culture_score';
-
-  static Future<void> record(int novelId, int level, int stars) async {
+  static Future<void> record(int novelId, int level, int stars, {String game = 'culture'}) async {
     final prefs = await SharedPreferences.getInstance();
-    final map = await all();
+    final map = await all(game: game);
     final k = '$novelId-$level';
     if (stars > (map[k] ?? 0)) {
       map[k] = stars;
       await prefs.setStringList(
-          _key, map.entries.map((e) => '${e.key}=${e.value}').toList());
+          _starsKey(game), map.entries.map((e) => '${e.key}=${e.value}').toList());
     }
   }
 
   /// Score cumulé du joueur (base du classement du centre).
-  static Future<int> bestScore() async {
+  static Future<int> bestScore({String game = 'culture'}) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_scoreKey) ?? 0;
+    return prefs.getInt(_scoreKeyOf(game)) ?? 0;
   }
 
-  static Future<void> addScore(int points) async {
+  static Future<void> addScore(int points, {String game = 'culture'}) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_scoreKey, (prefs.getInt(_scoreKey) ?? 0) + points);
+    await prefs.setInt(_scoreKeyOf(game), (prefs.getInt(_scoreKeyOf(game)) ?? 0) + points);
   }
 
-  static Future<int> totalStars() async {
-    final map = await all();
+  static Future<int> totalStars({String game = 'culture'}) async {
+    final map = await all(game: game);
     return map.values.fold<int>(0, (sum, v) => sum + v);
   }
 
   /// Copie envoyée au serveur (progression sauvegardée).
-  static Future<Map<String, dynamic>> snapshot() async => {
-        'stars': await all(),
-        'bestTotal': await bestScore(),
+  static Future<Map<String, dynamic>> snapshot({String game = 'culture'}) async => {
+        'stars': await all(game: game),
+        'bestTotal': await bestScore(game: game),
         'played': 0,
       };
 
   /// Fusion « le meilleur des deux » avec la copie du serveur.
-  static Future<void> merge(Map<String, dynamic> remote) async {
+  static Future<void> merge(Map<String, dynamic> remote, {String game = 'culture'}) async {
     final prefs = await SharedPreferences.getInstance();
-    final map = await all();
+    final map = await all(game: game);
     final rs = remote['stars'];
     if (rs is Map) {
       rs.forEach((k, v) {
@@ -71,10 +72,10 @@ class CultureProgress {
         if (n > (map[k.toString()] ?? 0)) map[k.toString()] = n;
       });
       await prefs.setStringList(
-          _key, map.entries.map((e) => '${e.key}=${e.value}').toList());
+          _starsKey(game), map.entries.map((e) => '${e.key}=${e.value}').toList());
     }
     final rb = int.tryParse(remote['bestTotal']?.toString() ?? '') ?? 0;
-    if (rb > (prefs.getInt(_scoreKey) ?? 0)) await prefs.setInt(_scoreKey, rb);
+    if (rb > (prefs.getInt(_scoreKeyOf(game)) ?? 0)) await prefs.setInt(_scoreKeyOf(game), rb);
   }
 
   /// Le niveau 1 d'une œuvre est toujours ouvert : l'élève doit pouvoir
@@ -85,7 +86,24 @@ class CultureProgress {
 
 /// Carte du jeu : une œuvre par bloc, ses niveaux en dessous.
 class CultureMapScreen extends StatefulWidget {
-  const CultureMapScreen({super.key});
+  /// Par défaut le Défi Lecture ; le Défi SVT réutilise le même écran avec
+  /// ses propres mondes (`svt_models.dart`).
+  const CultureMapScreen({
+    super.key,
+    this.game = 'culture',
+    this.title = 'Défi Lecture',
+    this.subtitle = 'Les œuvres au programme de 1ʳᵉ Bac',
+    this.emoji = '📖',
+    this.colors = const [Color(0xFF7C3AED), Color(0xFFA855F7)],
+    this.novels = kNovels,
+  });
+
+  final String game;
+  final String title;
+  final String subtitle;
+  final String emoji;
+  final List<Color> colors;
+  final List<Novel> novels;
 
   @override
   State<CultureMapScreen> createState() => _CultureMapScreenState();
@@ -97,10 +115,10 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
 
   void _openLeaderboard() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => const LeaderboardScreen(
-        game: 'culture',
-        title: 'Défi Lecture',
-        color: Color(0xFF7C3AED),
+      builder: (_) => LeaderboardScreen(
+        game: widget.game,
+        title: widget.title,
+        color: widget.colors.first,
       ),
     ));
   }
@@ -112,7 +130,7 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
   }
 
   Future<void> _load() async {
-    final stars = await CultureProgress.all();
+    final stars = await CultureProgress.all(game: widget.game);
     if (!mounted) return;
     setState(() {
       _stars = stars;
@@ -122,7 +140,12 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
 
   Future<void> _play(Novel novel, int levelIndex) async {
     await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => CulturePlayScreen(novel: novel, levelIndex: levelIndex),
+      builder: (_) => CulturePlayScreen(
+        novel: novel,
+        levelIndex: levelIndex,
+        game: widget.game,
+        title: widget.title,
+      ),
     ));
     _load();
   }
@@ -131,7 +154,7 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     final total = _stars.values.fold<int>(0, (s, v) => s + v);
-    final maxStars = kNovels.length * 3 * 3;
+    final maxStars = widget.novels.length * 3 * 3;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -139,8 +162,8 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF7C3AED), Color(0xFFA855F7)],
+            gradient: LinearGradient(
+              colors: widget.colors,
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -149,16 +172,16 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '📖 Défi Lecture',
-                style: TextStyle(
+              Text(
+                '${widget.emoji} ${widget.title}',
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
                     fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 2),
               Text(
-                'Les œuvres au programme de 1ʳᵉ Bac',
+                widget.subtitle,
                 style: TextStyle(color: Colors.white.withValues(alpha: 0.9)),
               ),
               const SizedBox(height: 14),
@@ -213,7 +236,7 @@ class _CultureMapScreenState extends State<CultureMapScreen> {
           ),
         ),
         const SizedBox(height: 18),
-        for (final novel in kNovels) ...[
+        for (final novel in widget.novels) ...[
           _novelCard(novel),
           const SizedBox(height: 14),
         ],
@@ -341,10 +364,16 @@ class CulturePlayScreen extends StatefulWidget {
     super.key,
     required this.novel,
     required this.levelIndex,
+    this.game = 'culture',
+    this.title = 'Défi Lecture',
   });
 
   final Novel novel;
   final int levelIndex;
+
+  /// Identifiant du jeu côté serveur et clés de progression locales.
+  final String game;
+  final String title;
 
   @override
   State<CulturePlayScreen> createState() => _CulturePlayScreenState();
@@ -377,7 +406,7 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
   /// classement.
   Future<void> _open() async {
     try {
-      final a = await GameArena.start('culture');
+      final a = await GameArena.start(widget.game);
       if (mounted) setState(() => _attempt = a);
     } on ArenaBlocked catch (b) {
       if (!mounted) return;
@@ -441,11 +470,11 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
                 ? 1
                 : 0;
     await CultureProgress.record(
-        widget.novel.id, widget.levelIndex + 1, stars);
+        widget.novel.id, widget.levelIndex + 1, stars, game: widget.game);
     // Points de la manche : bonnes réponses + bonus selon le niveau (les
     // niveaux difficiles rapportent davantage).
     final points = _correct * 100 + stars * 50 * (widget.levelIndex + 1);
-    await CultureProgress.addScore(points);
+    await CultureProgress.addScore(points, game: widget.game);
     // Arène du mois : seule une manche ouverte par le serveur compte, avec
     // les points de LA manche (durée et plafond vérifiés côté serveur).
     LeaderboardMe? me;
@@ -459,8 +488,8 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
         ));
       }
     }
-    // Progression (œuvres, étoiles) sauvegardée sur le serveur.
-    await GameArena.pushProgress('culture', await CultureProgress.snapshot());
+    // Progression (mondes, étoiles) sauvegardée sur le serveur.
+    await GameArena.pushProgress(widget.game, await CultureProgress.snapshot(game: widget.game));
     if (!mounted) return;
 
     final color = Color(widget.novel.color);
@@ -600,13 +629,15 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
           builder: (_) => CulturePlayScreen(
             novel: widget.novel,
             levelIndex: widget.levelIndex + 1,
+            game: widget.game,
+            title: widget.title,
           ),
         ));
       case 'board':
         await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => LeaderboardScreen(
-            game: 'culture',
-            title: 'Défi Lecture',
+            game: widget.game,
+            title: widget.title,
             color: Color(widget.novel.color),
           ),
         ));
