@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/theme.dart';
+import 'game_arena.dart';
 import 'game_models.dart';
 import 'game_progress.dart';
 import 'leaderboard.dart';
@@ -42,9 +43,42 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   String? _picked;
   bool _finished = false;
 
+  /// Manche ouverte par le serveur (null hors-ligne : la manche ne compte pas).
+  ArenaAttempt? _attempt;
+
   @override
   void initState() {
     super.initState();
+    _open();
+  }
+
+  /// Demande l'ouverture d'une manche : le serveur peut refuser (attente
+  /// croissante entre deux parties, jeu fermé au niveau) — on ferme alors
+  /// l'écran après explication. Hors-ligne, on joue quand même.
+  Future<void> _open() async {
+    ArenaAttempt? attempt;
+    try {
+      attempt = await GameArena.start('math');
+    } on ArenaBlocked catch (b) {
+      if (!mounted) return;
+      if (b.code != 'OFFLINE') {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(b.code == 'COOLDOWN' ? '⏳ Un peu de patience' : '🔒 Jeu fermé'),
+            content: b.code == 'COOLDOWN'
+                ? CooldownCountdown(seconds: b.waitSeconds, message: b.message)
+                : Text(b.message),
+            actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
+          ),
+        );
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(b.message)));
+    }
+    if (!mounted) return;
+    setState(() => _attempt = attempt);
     _nextQuestion();
   }
 
@@ -112,13 +146,20 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       stars: stars,
       score: _score,
     );
-    // Classement du centre : total cumulé de l'élève (somme de ses meilleurs
-    // scores) — hors-ligne, `me` reste null et le jeu continue normalement.
-    final me = await LeaderboardRepo.submit(
-      game: 'math',
-      score: await GameProgress.bestScore(),
-      stars: await GameProgress.totalStars(),
-    );
+    // Arène du mois : la manche n'est comptée que si le serveur l'a ouverte
+    // (jeton) et la juge plausible (durée, plafond). Le score de la MANCHE
+    // est envoyé, pas le cumul : le classement compare des parties.
+    LeaderboardMe? me;
+    if (_attempt != null) {
+      final r = await GameArena.finish(_attempt!, won: stars > 0, score: _score, stars: stars);
+      me = r?.me;
+      _attempt = null;
+      if (r != null && !r.accepted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Manche non comptée au classement (partie trop rapide ou invalide).'),
+        ));
+      }
+    }
     if (!mounted) return;
     await _showResult(stars, improved, me);
   }
@@ -321,7 +362,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       _streak = 0;
       _finished = false;
     });
-    _nextQuestion();
+    // Rejouer = nouvelle manche : le serveur décide à nouveau (attente).
+    _open();
   }
 
   @override

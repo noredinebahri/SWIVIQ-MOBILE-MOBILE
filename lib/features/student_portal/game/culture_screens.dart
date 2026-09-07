@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/theme.dart';
 import 'culture_models.dart';
+import 'game_arena.dart';
 import 'leaderboard.dart';
 
 /// Progression du jeu de culture (clés distinctes du jeu de calcul).
@@ -333,6 +334,9 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
   String? _picked;
   bool _finished = false;
 
+  /// Manche ouverte par le serveur (null hors-ligne : la manche ne compte pas).
+  ArenaAttempt? _attempt;
+
   @override
   void initState() {
     super.initState();
@@ -341,6 +345,34 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
       ..shuffle(rnd);
     _questions = pool.take(kCultureQuestionsPerRound).toList();
     _shuffleChoices();
+    _open();
+  }
+
+  /// Ouverture de la manche côté serveur : attente croissante ou jeu fermé
+  /// → explication puis fermeture de l'écran ; hors-ligne → on joue sans
+  /// classement.
+  Future<void> _open() async {
+    try {
+      final a = await GameArena.start('culture');
+      if (mounted) setState(() => _attempt = a);
+    } on ArenaBlocked catch (b) {
+      if (!mounted) return;
+      if (b.code == 'OFFLINE') {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(b.message)));
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(b.code == 'COOLDOWN' ? '⏳ Un peu de patience' : '🔒 Jeu fermé'),
+          content: b.code == 'COOLDOWN'
+              ? CooldownCountdown(seconds: b.waitSeconds, message: b.message)
+              : Text(b.message),
+          actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
+        ),
+      );
+      if (mounted) Navigator.of(context).pop();
+    }
   }
 
   void _shuffleChoices() {
@@ -390,11 +422,19 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
     // niveaux difficiles rapportent davantage).
     final points = _correct * 100 + stars * 50 * (widget.levelIndex + 1);
     await CultureProgress.addScore(points);
-    final me = await LeaderboardRepo.submit(
-      game: 'culture',
-      score: await CultureProgress.bestScore(),
-      stars: await CultureProgress.totalStars(),
-    );
+    // Arène du mois : seule une manche ouverte par le serveur compte, avec
+    // les points de LA manche (durée et plafond vérifiés côté serveur).
+    LeaderboardMe? me;
+    if (_attempt != null) {
+      final r = await GameArena.finish(_attempt!, won: stars > 0, score: points, stars: stars);
+      me = r?.me;
+      _attempt = null;
+      if (r != null && !r.accepted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Manche non comptée au classement (partie trop rapide ou invalide).'),
+        ));
+      }
+    }
     if (!mounted) return;
 
     final color = Color(widget.novel.color);
@@ -561,6 +601,8 @@ class _CulturePlayScreenState extends State<CulturePlayScreen> {
       _finished = false;
       _shuffleChoices();
     });
+    // Rejouer = nouvelle manche : le serveur décide à nouveau (attente).
+    _open();
   }
 
   @override
