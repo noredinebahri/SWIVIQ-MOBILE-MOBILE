@@ -9,8 +9,11 @@ import 'response_cache.dart';
 const kBaseUrl = 'https://atlasapi.swiviq.com/api/v1';
 const kTokenKey = 'ox_jwt';
 
+/// `resetOnError` : si le coffre ne peut plus être déchiffré (cas typique :
+/// Android a restauré le fichier chiffré d'une installation précédente sans
+/// sa clé), il est vidé au lieu de lever une exception à chaque lecture.
 const _storage = FlutterSecureStorage(
-  aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  aOptions: AndroidOptions(encryptedSharedPreferences: true, resetOnError: true),
 );
 
 class TokenStore {
@@ -20,9 +23,22 @@ class TokenStore {
   /// Lecture mémoïsée : le coffre chiffré coûte un aller-retour plateforme à
   /// chaque appel, et CHAQUE requête le lisait. Une centaine de requêtes par
   /// session, c'est une centaine de lectures évitées.
+  ///
+  /// Ne lève JAMAIS : un coffre illisible (clé perdue après réinstallation,
+  /// plugin indisponible) vaut « pas de session ». Avant, l'exception
+  /// remontait dans l'intercepteur HTTP et faisait échouer la toute première
+  /// requête de l'app — la saisie du code du centre — avec « une erreur est
+  /// survenue (null) », sans qu'aucune requête ne parte.
   static Future<String?> read() async {
     if (_loaded) return _cached;
-    _cached = await _storage.read(key: kTokenKey);
+    try {
+      _cached = await _storage.read(key: kTokenKey);
+    } catch (_) {
+      _cached = null;
+      try {
+        await _storage.deleteAll();
+      } catch (_) {}
+    }
     _loaded = true;
     return _cached;
   }
@@ -30,13 +46,19 @@ class TokenStore {
   static Future<void> write(String token) async {
     _cached = token;
     _loaded = true;
-    await _storage.write(key: kTokenKey, value: token);
+    try {
+      await _storage.write(key: kTokenKey, value: token);
+    } catch (_) {
+      // Coffre indisponible : la session vit le temps du processus.
+    }
   }
 
   static Future<void> clear() async {
     _cached = null;
     _loaded = true;
-    await _storage.delete(key: kTokenKey);
+    try {
+      await _storage.delete(key: kTokenKey);
+    } catch (_) {}
     // Un autre compte ne doit rien retrouver du précédent.
     await ResponseCache.instance.clear();
   }
@@ -257,6 +279,13 @@ class ApiClient {
       message = 'Connexion impossible. Vérifiez votre réseau.';
     } else if (status != null && status >= 500) {
       message = 'Le serveur rencontre un problème ($status). Réessayez dans un instant.';
+    } else if (e.type == DioExceptionType.badCertificate) {
+      message = 'Connexion sécurisée refusée par le téléphone (certificat). Vérifiez la date et l\'heure de l\'appareil.';
+    } else if (status == null) {
+      // Erreur survenue AVANT ou APRÈS le réseau (plugin, décodage…) : on
+      // montre la cause, sinon impossible de diagnostiquer à distance.
+      final cause = (e.error ?? e.message ?? '').toString();
+      message = 'Erreur dans l\'application : ${cause.isEmpty ? e.type.name : cause.split('\n').first}';
     } else {
       message = 'Une erreur est survenue ($status).';
     }
