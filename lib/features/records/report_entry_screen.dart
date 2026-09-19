@@ -6,6 +6,19 @@ import '../../core/models/records.dart';
 import '../../core/repositories.dart';
 import '../../core/widgets/common.dart';
 
+/// Vert WhatsApp, le même que l'action rapide de la fiche élève.
+const _kWhatsappGreen = Color(0xFF25D366);
+
+/// Ce que la feuille d'évaluation rend à l'écran : l'évaluation enregistrée
+/// et, si le professeur a choisi le bouton vert, le résultat de l'envoi au
+/// responsable (null quand il a simplement enregistré).
+class _EvalOutcome {
+  const _EvalOutcome(this.evaluation, this.whatsapp);
+
+  final StudentEvaluation evaluation;
+  final WhatsappSendResult? whatsapp;
+}
+
 /// Tunnel de saisie des bulletins : un élève à la fois, pensé mobile
 /// (chaque sauvegarde est indépendante — une coupure réseau ne perd rien).
 class ReportEntryScreen extends StatefulWidget {
@@ -75,7 +88,7 @@ class _ReportEntryScreenState extends State<ReportEntryScreen> {
 
   Future<void> _openEvalSheet(int index) async {
     final student = _students![index];
-    final result = await showModalBottomSheet<StudentEvaluation>(
+    final result = await showModalBottomSheet<_EvalOutcome>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -92,10 +105,23 @@ class _ReportEntryScreenState extends State<ReportEntryScreen> {
           id: student.id,
           firstname: student.firstname,
           lastname: student.lastname,
-          evaluation: result,
+          evaluation: result.evaluation,
         );
       });
-      showSnack(context, 'Enregistré ✅');
+      // L'enregistrement est acquis dans les trois cas : seul l'envoi au
+      // parent peut avoir échoué, et le professeur doit le savoir.
+      final wa = result.whatsapp;
+      if (wa == null) {
+        showSnack(context, 'Enregistré ✅');
+      } else if (wa.sent) {
+        showSnack(context, 'Enregistré et envoyé au parent par WhatsApp ✅');
+      } else {
+        showSnack(
+          context,
+          'Enregistré, mais WhatsApp non envoyé : ${wa.error ?? 'raison inconnue'}',
+          error: true,
+        );
+      }
     }
   }
 
@@ -393,6 +419,9 @@ class _EvalSheetState extends State<_EvalSheet> {
   late final TextEditingController _commentController;
   bool _saving = false;
 
+  /// Quel bouton a lancé l'enregistrement en cours (pour le spinner).
+  bool _viaWhatsapp = false;
+
   @override
   void initState() {
     super.initState();
@@ -412,15 +441,20 @@ class _EvalSheetState extends State<_EvalSheet> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  /// Enregistre ; avec [sendWhatsapp], le serveur transmet aussi
+  /// l'évaluation au responsable de l'élève dans la même requête.
+  Future<void> _save({bool sendWhatsapp = false}) async {
     if (_overall == null) {
       showSnack(context, 'Choisissez une impression générale.', error: true);
       return;
     }
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _viaWhatsapp = sendWhatsapp;
+    });
     final comment = _commentController.text.trim();
     try {
-      await StudentReportRepo.saveEvaluation(
+      final whatsapp = await StudentReportRepo.saveEvaluation(
         studentId: widget.student.id,
         levelId: widget.levelId,
         group: widget.group,
@@ -430,14 +464,18 @@ class _EvalSheetState extends State<_EvalSheet> {
         concerns: _concerns.toList(),
         teacherGrade: _noGrade ? null : _grade,
         teacherComment: comment.isEmpty ? null : comment,
+        sendWhatsapp: sendWhatsapp,
       );
       if (!mounted) return;
-      Navigator.of(context).pop(StudentEvaluation(
-        overall: _overall,
-        strengths: _strengths.toList(),
-        concerns: _concerns.toList(),
-        teacherGrade: _noGrade ? null : _grade,
-        teacherComment: comment.isEmpty ? null : comment,
+      Navigator.of(context).pop(_EvalOutcome(
+        StudentEvaluation(
+          overall: _overall,
+          strengths: _strengths.toList(),
+          concerns: _concerns.toList(),
+          teacherGrade: _noGrade ? null : _grade,
+          teacherComment: comment.isEmpty ? null : comment,
+        ),
+        whatsapp,
       ));
     } on ApiException catch (e) {
       if (mounted) showSnack(context, e.message, error: true);
@@ -625,17 +663,48 @@ class _EvalSheetState extends State<_EvalSheet> {
               ),
             ),
             const SizedBox(height: 20),
+            // Bouton vert : l'évaluation part au responsable de l'élève
+            // (WhatsApp) dans le même geste que l'enregistrement.
             FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: _saving
+              onPressed: _saving ? null : () => _save(sendWhatsapp: true),
+              style: FilledButton.styleFrom(
+                backgroundColor: _kWhatsappGreen,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor:
+                    _kWhatsappGreen.withValues(alpha: 0.55),
+                disabledForegroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+              ),
+              icon: _saving && _viaWhatsapp
                   ? const SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
                           strokeWidth: 2.4, color: Colors.white),
                     )
+                  : const Icon(Icons.chat_rounded),
+              label: Text(
+                _saving && _viaWhatsapp
+                    ? 'Envoi en cours…'
+                    : 'Envoyer par WhatsApp et enregistrer',
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => _save(),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              icon: _saving && !_viaWhatsapp
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2.4),
+                    )
                   : const Icon(Icons.save_rounded),
-              label: Text(_saving ? 'Enregistrement…' : 'Enregistrer'),
+              label: Text(
+                  _saving && !_viaWhatsapp ? 'Enregistrement…' : 'Enregistrer'),
             ),
           ],
         ),

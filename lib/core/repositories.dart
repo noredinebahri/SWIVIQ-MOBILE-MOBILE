@@ -583,7 +583,11 @@ class StudentReportRepo {
         .toList();
   }
 
-  static Future<void> saveEvaluation({
+  /// Enregistre l'évaluation. Avec [sendWhatsapp], le serveur la transmet
+  /// ensuite au responsable de l'élève et rend le résultat de l'envoi ;
+  /// l'enregistrement reste acquis même si l'envoi échoue. Null si l'envoi
+  /// n'a pas été demandé.
+  static Future<WhatsappSendResult?> saveEvaluation({
     required int studentId,
     required int levelId,
     required String group,
@@ -595,8 +599,9 @@ class StudentReportRepo {
     List<String> concerns = const [],
     num? teacherGrade,
     String? teacherComment,
+    bool sendWhatsapp = false,
   }) async {
-    await _api.patch('/student-report/eleve/$studentId', data: {
+    final data = await _api.patch('/student-report/eleve/$studentId', data: {
       'levelId': levelId,
       'group': group,
       'subject': subject,
@@ -608,7 +613,16 @@ class StudentReportRepo {
       if (teacherGrade != null) 'teacherGrade': teacherGrade,
       if (teacherComment != null && teacherComment.isNotEmpty)
         'teacherComment': teacherComment,
+      if (sendWhatsapp) 'sendWhatsapp': true,
     });
+    if (!sendWhatsapp) return null;
+    final payload = data is Map ? data['payload'] : null;
+    final wa = payload is Map ? payload['whatsapp'] : null;
+    if (wa is Map) {
+      return WhatsappSendResult.fromJson(Map<String, dynamic>.from(wa));
+    }
+    return const WhatsappSendResult(
+        sent: false, error: 'Réponse inattendue du serveur.');
   }
 
   /// Marque tous les élèves restants du groupe comme « correct ».

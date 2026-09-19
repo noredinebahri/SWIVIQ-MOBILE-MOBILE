@@ -240,6 +240,23 @@ class StudentEvaluation {
       );
 }
 
+/// Résultat de l'envoi au responsable demandé avec l'enregistrement
+/// (PATCH /student-report/eleve/:id avec `sendWhatsapp`, `payload.whatsapp`).
+class WhatsappSendResult {
+  const WhatsappSendResult({required this.sent, this.phone, this.error});
+
+  final bool sent;
+  final String? phone;
+  final String? error;
+
+  factory WhatsappSendResult.fromJson(Map<String, dynamic> j) =>
+      WhatsappSendResult(
+        sent: j['sent'] == true,
+        phone: j['phone']?.toString(),
+        error: j['error']?.toString(),
+      );
+}
+
 /// Vocabulaires du backend (evaluation.rules.js) avec libellés FR.
 const kOverallOptions = {
   'tres_bien': 'Très bien',
