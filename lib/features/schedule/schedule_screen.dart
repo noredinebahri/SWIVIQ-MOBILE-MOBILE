@@ -25,7 +25,12 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
   // Filtres.
   /// Niveaux couverts par le niveau supérieur choisi (vide = tous).
   List<int> _levelIds = [];
+  /// Le niveau supérieur choisi lui-même : les séances saisies « par niveau
+  /// supérieur » portent cet id et AUCUN levelId — sans lui, le filtre les
+  /// faisait disparaître alors que ce sont justement celles du prof.
+  int? _levelGroupId;
   String? _levelName;
+  bool get _hasLevelFilter => _levelGroupId != null || _levelIds.isNotEmpty;
   int? _teacherId;
   String? _teacherName;
   String? _dayFilter;
@@ -122,7 +127,10 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
     return _slots.where((s) {
       // Filtre par NIVEAU SUPÉRIEUR : garde les créneaux de TOUTES ses
       // branches (comme l'écran Absences).
-      if (_levelIds.isNotEmpty && !_levelIds.contains(s.levelId)) return false;
+      if (_hasLevelFilter &&
+          !s.matchesScope(levelGroupId: _levelGroupId, levelIds: _levelIds)) {
+        return false;
+      }
       if (_teacherId != null && s.userId != _teacherId) return false;
       if (_dayFilter != null && s.day != _dayFilter) return false;
       return true;
@@ -137,16 +145,18 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
     final groups = ref.read(levelGroupsProvider).valueOrNull ?? [];
     final actifs = levels.where((l) => l.actif == 1).toList();
 
-    // (label, levelIds)
-    final choices = <(String, List<int>)>[];
+    // (label, levelIds, levelGroupId). Un niveau supérieur est proposé même
+    // sans branche active : ses séances existent quand même.
+    final choices = <(String, List<int>, int?)>[];
     for (final g in groups) {
       final ids =
           actifs.where((l) => l.levelGroupId == g.id).map((l) => l.id).toList();
-      if (ids.isNotEmpty) choices.add((g.name, ids));
+      final hasSlots = _slots.any((s) => s.levelGroupId == g.id);
+      if (ids.isNotEmpty || hasSlots) choices.add((g.name, ids, g.id));
     }
     final ungrouped = actifs.where((l) => l.levelGroupId == null).toList();
 
-    final picked = await showModalBottomSheet<(String, List<int>)>(
+    final picked = await showModalBottomSheet<(String, List<int>, int?)>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -169,9 +179,9 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
               ListTile(
                 leading: const Icon(Icons.clear_all_rounded),
                 title: const Text('Tous les niveaux'),
-                selected: _levelIds.isEmpty,
+                selected: !_hasLevelFilter,
                 onTap: () =>
-                    Navigator.of(sheetContext).pop(('', <int>[])),
+                    Navigator.of(sheetContext).pop(('', <int>[], null)),
               ),
               for (final c in choices)
                 ListTile(
@@ -179,8 +189,9 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                       color: AppColors.primary600),
                   title: Text(c.$1,
                       style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle:
-                      Text('${c.$2.length} niveau${c.$2.length > 1 ? 'x' : ''}'),
+                  subtitle: Text(c.$2.isEmpty
+                      ? 'Séances du niveau supérieur'
+                      : '${c.$2.length} niveau${c.$2.length > 1 ? 'x' : ''}'),
                   selected: _levelName == c.$1,
                   trailing: _levelName == c.$1
                       ? const Icon(Icons.check_rounded,
@@ -208,7 +219,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                     title: Text(l.displayName),
                     selected: _levelName == l.displayName,
                     onTap: () => Navigator.of(sheetContext)
-                        .pop((l.displayName, [l.id])),
+                        .pop((l.displayName, [l.id], null)),
                   ),
               ],
               const SizedBox(height: 12),
@@ -220,7 +231,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
     if (picked == null) return;
     setState(() {
       _levelIds = picked.$2;
-      _levelName = picked.$2.isEmpty ? null : picked.$1;
+      _levelGroupId = picked.$3;
+      _levelName = (picked.$2.isEmpty && picked.$3 == null) ? null : picked.$1;
     });
   }
 
@@ -348,7 +360,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: [
           // Niveau.
-          _levelIds.isEmpty
+          !_hasLevelFilter
               ? ActionChip(
                   avatar: const Icon(Icons.account_tree_rounded, size: 18),
                   label: const Text('Niveau supérieur'),
@@ -361,6 +373,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                   onPressed: _pickLevel,
                   onDeleted: () => setState(() {
                     _levelIds = [];
+                    _levelGroupId = null;
                     _levelName = null;
                   }),
                 ),
@@ -542,9 +555,9 @@ class _SlotCard extends StatelessWidget {
                     runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      if ((slot.levelName ?? '').isNotEmpty)
+                      if (slot.scopeLabel.isNotEmpty)
                         Text(
-                          slot.levelName!,
+                          slot.scopeLabel,
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: AppColors.secondary400),
                         ),

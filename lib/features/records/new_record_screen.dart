@@ -22,7 +22,12 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
   static const _presets = [30, 45, 60, 90, 120, 150, 180];
 
   int? _levelId;
+  int? _levelGroupId;
   String? _levelLabel;
+  /// Date réelle de la séance. Par défaut aujourd'hui ; le prof peut remonter
+  /// aussi loin qu'il veut (séances faites avant d'avoir l'application), sans
+  /// jamais dépasser aujourd'hui — une séance ne se déclare pas à l'avance.
+  DateTime _date = DateTime.now();
   int _minutes = 60;
   final _descController = TextEditingController();
   bool _saving = false;
@@ -46,10 +51,47 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
         .firstOrNull;
     setState(() {
       _levelId = picked.id;
+      _levelGroupId = picked.levelGroupId;
       _levelLabel = groupName != null
           ? '$groupName · ${picked.displayName}'
           : picked.displayName;
     });
+  }
+
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static const _months = [
+    'janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+    'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'
+  ];
+  static const _weekdays = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+
+  String get _dateLabel {
+    final today = DateTime.now();
+    final sameDay = _date.year == today.year &&
+        _date.month == today.month &&
+        _date.day == today.day;
+    final base =
+        '${_weekdays[_date.weekday - 1]} ${_date.day} ${_months[_date.month - 1]} ${_date.year}';
+    return sameDay ? "Aujourd'hui · $base" : base;
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date.isAfter(now) ? now : _date,
+      // Aucune borne basse utile : on peut saisir n'importe quelle séance
+      // passée, même d'une année scolaire précédente.
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: now,
+      helpText: 'Date de la séance',
+      cancelText: 'Annuler',
+      confirmText: 'OK',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _date = picked);
   }
 
   @override
@@ -80,8 +122,10 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
       await RecordsRepo.createRecord(
         userId: user.id,
         levelId: _levelId!,
+        levelGroupId: _levelGroupId,
         recordTimeMinutes: _minutes,
         description: description,
+        dateYmd: _ymd(_date),
       );
       if (!mounted) return;
       await _showSuccessDialog();
@@ -246,6 +290,41 @@ class _NewRecordScreenState extends ConsumerState<NewRecordScreen> {
                       ),
                     ],
                   ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          OxCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Date de la séance',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: _pickDate,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.event_rounded),
+                      suffixIcon: Icon(Icons.expand_more_rounded),
+                    ),
+                    child: Text(
+                      _dateLabel,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Une séance déjà faite se saisit à sa vraie date.',
+                  style: TextStyle(fontSize: 12, color: AppColors.secondary400),
                 ),
               ],
             ),

@@ -36,6 +36,8 @@ class ScheduleSlot {
     this.room,
     this.levelId,
     this.levelName,
+    this.levelGroupId,
+    this.levelGroupName,
     this.userId,
     this.teacherName,
   });
@@ -53,10 +55,31 @@ class ScheduleSlot {
 
   /// Code salle A..E ; C = grande, D = biblio, E = cuisine.
   final String? room;
+  /// Une séance vise SOIT une branche (`levelId`), SOIT un niveau supérieur
+  /// (`levelGroupId`, toutes ses branches) — jamais les deux (cf. backend
+  /// schedule.model.js). Un écran qui ne lit que `levelId` perd donc toutes
+  /// les séances « 2ᵉ Bac » : elles n'ont pas de niveau, mais un groupe.
   final int? levelId;
   final String? levelName;
+  final int? levelGroupId;
+  final String? levelGroupName;
   final int? userId;
   final String? teacherName;
+
+  /// Libellé de ce que la séance concerne : le niveau supérieur, ou la
+  /// branche isolée. Jamais vide si le backend a renseigné l'un des deux.
+  String get scopeLabel {
+    final g = (levelGroupName ?? '').trim();
+    if (g.isNotEmpty) return g;
+    return (levelName ?? '').trim();
+  }
+
+  /// La séance concerne-t-elle ce niveau supérieur (directement, ou via une
+  /// de ses branches dont les ids sont fournis) ?
+  bool matchesScope({int? levelGroupId, List<int> levelIds = const []}) {
+    if (levelGroupId != null && this.levelGroupId == levelGroupId) return true;
+    return levelId != null && levelIds.contains(levelId);
+  }
 
   String get roomLabel => switch (room) {
         'C' => 'Grande salle',
@@ -83,6 +106,9 @@ class ScheduleSlot {
       room: j['room']?.toString(),
       levelId: asIntOrNull(j['levelId']),
       levelName: j['level'] is Map ? j['level']['name']?.toString() : null,
+      levelGroupId: asIntOrNull(j['levelGroupId'] ?? j['level_group_id']),
+      levelGroupName:
+          j['levelGroup'] is Map ? j['levelGroup']['name']?.toString() : null,
       userId: asIntOrNull(j['userId']),
       teacherName: teacherName?.isEmpty == true ? null : teacherName,
     );

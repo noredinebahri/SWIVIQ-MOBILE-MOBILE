@@ -93,6 +93,15 @@ class ScheduleRepo {
         .toList();
   }
 
+  /// L'emploi du temps sélectionné du centre (null si aucun). Sans lui, un
+  /// `GET /schedule` nu renvoie les créneaux de TOUS les emplois jamais créés
+  /// — l'accueil mélangeait alors septembre, octobre et les essais.
+  static Future<ScheduleConfig?> activeConfig() async {
+    final data = await _api.get('/schedule/config/active');
+    if (data is! Map) return null;
+    return ScheduleConfig.fromJson(Map<String, dynamic>.from(data));
+  }
+
   static Future<List<ScheduleSlot>> slots({int? scheduleConfigId}) async {
     final data = await _api.get('/schedule',
         query: scheduleConfigId == null
@@ -185,17 +194,26 @@ class AbsenceRepo {
 
 class RecordsRepo {
   /// Saisie d'une séance par le prof (part en attente de validation).
+  ///
+  /// [dateYmd] : date réelle de la séance (`YYYY-MM-DD`). Le serveur la
+  /// range dans `createdAt`, comme le fait le formulaire web : sans elle, une
+  /// séance d'hier saisie aujourd'hui tombait sur le mauvais jour — et sur
+  /// le mauvais mois de paie en début de mois.
   static Future<void> createRecord({
     required int userId,
     required int levelId,
     required int recordTimeMinutes,
     required String description,
+    String? dateYmd,
+    int? levelGroupId,
   }) async {
     await _api.post('/teacher/create', data: {
       'userId': userId,
       'levelId': levelId,
+      if (levelGroupId != null) 'levelGroupId': levelGroupId,
       'recordTime': recordTimeMinutes,
       'recordDescription': description,
+      if (dateYmd != null) 'createdAt': dateYmd,
     });
   }
 

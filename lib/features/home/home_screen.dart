@@ -50,7 +50,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await Future.wait([
       () async {
         try {
-          final slots = await ScheduleRepo.slots();
+          // Uniquement l'emploi du temps sélectionné : sans ce filtre les
+          // séances de tous les emplois (anciens compris) se superposaient.
+          final active = await ScheduleRepo.activeConfig();
+          final slots =
+              await ScheduleRepo.slots(scheduleConfigId: active?.id);
           var today = slots.where((s) => s.day == _todayName).toList()
             ..sort((a, b) => a.startTime.compareTo(b.startTime));
           if (user != null && user.isTeacher) {
@@ -434,7 +438,7 @@ class _SlotTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   [
-                    if (slot.levelName != null) slot.levelName!,
+                    if (slot.scopeLabel.isNotEmpty) slot.scopeLabel,
                     if (slot.group != null && slot.group!.isNotEmpty)
                       'Grp ${slot.group}',
                     if (slot.teacherName != null) slot.teacherName!,
