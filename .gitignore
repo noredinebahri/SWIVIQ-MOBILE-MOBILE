@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Signature Play Store (jamais en git)
+android/key.properties
+android/upload-keystore.jks
+*.jks
