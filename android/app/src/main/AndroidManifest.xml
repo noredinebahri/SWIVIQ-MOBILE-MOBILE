@@ -30,6 +30,16 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Pointage : le QR de l'accueil encode https://atlas.swiviq.com/pointage/scan?t=…
+                 L'appareil photo propose d'ouvrir l'app (sans vérification de domaine :
+                 Android affiche le choix app / navigateur). -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="atlas.swiviq.com" android:pathPrefix="/pointage/scan"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

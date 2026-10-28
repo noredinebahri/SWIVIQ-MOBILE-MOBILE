@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../core/auth/auth_providers.dart';
 import '../core/config/center_config.dart';
 import '../features/center/center_setup_screen.dart';
+import '../features/clock/clock_screen.dart';
 import '../features/student_portal/student_portal_repo.dart';
 import '../features/absence/absence_report_screen.dart';
 import '../features/absence/absence_screen.dart';
@@ -91,6 +92,17 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/records/new',
         builder: (_, __) => const NewRecordScreen(),
+      ),
+      // Pointage du professeur. `/pointage/scan?t=…` est aussi l'URL encodée
+      // dans le QR de l'accueil : ouverte par l'appareil photo, elle arrive ici
+      // par lien profond et le jeton part sans passer par la caméra.
+      GoRoute(
+        path: '/pointage',
+        builder: (_, __) => const ClockScreen(),
+      ),
+      GoRoute(
+        path: '/pointage/scan',
+        builder: (_, state) => ClockScreen(initialToken: state.uri.queryParameters['t']),
       ),
       GoRoute(
         path: '/polycopie',

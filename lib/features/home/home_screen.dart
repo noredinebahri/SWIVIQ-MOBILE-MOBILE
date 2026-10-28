@@ -316,6 +316,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     onTap: () => context.go('/absence'),
                   ),
                 if (user.isTeacher ||
+                    (perms?.can('teacher_clock.self') ?? false))
+                  _QuickAction(
+                    icon: Icons.qr_code_scanner_rounded,
+                    label: 'Pointage',
+                    color: const Color(0xFF111111),
+                    onTap: () => context.push('/pointage'),
+                  ),
+                if (user.isTeacher ||
                     (perms?.can('teachers.new_record') ?? false))
                   _QuickAction(
                     icon: Icons.add_task_rounded,
