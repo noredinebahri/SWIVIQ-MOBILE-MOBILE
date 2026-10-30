@@ -5,6 +5,8 @@ import '../core/auth/auth_providers.dart';
 import '../core/config/center_config.dart';
 import '../features/center/center_setup_screen.dart';
 import '../features/clock/clock_screen.dart';
+import '../features/advances/advances_screen.dart';
+import '../features/advances/advance_decision_screen.dart';
 import '../features/student_portal/student_portal_repo.dart';
 import '../features/absence/absence_report_screen.dart';
 import '../features/absence/absence_screen.dart';
@@ -111,6 +113,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/records/stats',
         builder: (_, __) => const TeacherStatsScreen(),
+      ),
+      // Avances sur salaire : boîte de réception puis page de confirmation.
+      GoRoute(
+        path: '/avances',
+        builder: (_, __) => const AdvancesScreen(),
+      ),
+      GoRoute(
+        path: '/avances/:id',
+        builder: (_, state) => AdvanceDecisionScreen(
+            advanceId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0),
       ),
       GoRoute(
         path: '/payments/due',

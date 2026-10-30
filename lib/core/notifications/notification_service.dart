@@ -44,6 +44,8 @@ class NotificationService {
   static const managerPaymentsNotifId = 777001;
   static const scheduleUpdatedNotifId = 777002;
   static const polycopiesUpdatedNotifId = 777003;
+  static const _knownAdvanceIdsKey = 'ox_known_advance_ids';
+  static const _knownAdvanceStatusKey = 'ox_known_advance_status';
 
   /// Navigation à effectuer quand une notification est touchée
   /// (branchée par main.dart sur le routeur).
@@ -96,6 +98,8 @@ class NotificationService {
     } else if (payload == 'schedule_updated' ||
         payload == 'polycopies_updated') {
       onTapRoute?.call('/eleve');
+    } else if (payload != null && payload.startsWith('advance:')) {
+      onTapRoute?.call(payload.substring('advance:'.length));
     }
   }
 
@@ -227,6 +231,9 @@ class NotificationService {
         await _checkManagerPayments();
       }
 
+      // Avances sur salaire : nouvelle demande (direction) ou décision (prof).
+      await _checkAdvances(user, notify: notify);
+
       final records = await RecordsRepo.myRecords(user.id);
       final prefs = await SharedPreferences.getInstance();
 
@@ -299,6 +306,74 @@ class NotificationService {
       return false;
     }
   }
+
+  /// Direction / assistante : une demande d'avance en attente jamais vue →
+  /// notification qui ouvre la page de confirmation. Professeur : sa
+  /// demande vient d'être confirmée ou refusée → notification vers son solde.
+  Future<void> _checkAdvances(SessionUser user, {required bool notify}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (user.isTeacher) {
+        final mine = await AdvanceRepo.mine(year: DateTime.now().year);
+        final known = Map<String, String>.fromEntries(
+          (prefs.getStringList(_knownAdvanceStatusKey) ?? [])
+              .map((e) => e.split('='))
+              .where((p) => p.length == 2)
+              .map((p) => MapEntry(p[0], p[1])),
+        );
+        final first = !prefs.containsKey(_knownAdvanceStatusKey);
+        for (final a in mine) {
+          final prev = known['${a.id}'];
+          known['${a.id}'] = a.status;
+          if (first || !notify || prev == a.status || prev == null) continue;
+          if (a.isApproved) {
+            await _show(
+              id: 300000 + a.id,
+              title: 'Avance confirmée',
+              body:
+                  'Votre avance de ${_money(a.amount)} DH est confirmée${a.deciderName != null ? ' par ${a.deciderName}' : ''}. Elle sera retenue sur votre paie de ${a.periodLabel}.',
+              payload: 'advance:/records/stats',
+            );
+          } else if (a.isRejected) {
+            await _show(
+              id: 300000 + a.id,
+              title: 'Avance refusée',
+              body:
+                  'Votre demande d\'avance de ${_money(a.amount)} DH (${a.periodLabel}) a été refusée${a.decisionNote != null ? ' : ${a.decisionNote}' : '.'}',
+              payload: 'advance:/records/stats',
+            );
+          }
+        }
+        await prefs.setStringList(_knownAdvanceStatusKey,
+            known.entries.map((e) => '${e.key}=${e.value}').toList());
+        return;
+      }
+
+      if (!(user.isAdmin || user.role == 's')) return;
+      final (pending, _) = await AdvanceRepo.list(status: 'pending');
+      final known = (prefs.getStringList(_knownAdvanceIdsKey) ?? []).toSet();
+      final first = !prefs.containsKey(_knownAdvanceIdsKey);
+      for (final a in pending) {
+        final id = '${a.id}';
+        final isNew = !known.contains(id);
+        known.add(id);
+        if (first || !notify || !isNew) continue;
+        await _show(
+          id: 300000 + a.id,
+          title: 'Demande d\'avance sur salaire',
+          body:
+              '${a.teacherName} demande ${_money(a.amount)} DH sur la paie de ${a.periodLabel}. Touchez pour confirmer ou refuser.',
+          payload: 'advance:/avances/${a.id}',
+        );
+      }
+      await prefs.setStringList(_knownAdvanceIdsKey, known.toList());
+    } catch (_) {
+      // Avances indisponibles : on retentera au prochain cycle.
+    }
+  }
+
+  static String _money(num v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
 
   /// Nouvelle version d'emploi du temps publiée ? Remplace la copie locale
   /// et prévient l'élève — y compris quand l'app est fermée (WorkManager).

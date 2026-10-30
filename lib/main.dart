@@ -164,6 +164,8 @@ class _OxygeneAppState extends ConsumerState<OxygeneApp>
             await NotificationService.instance.takeLaunchPayload();
         if (payload == 'payments_due') {
           ref.read(routerProvider).push('/payments/due');
+        } else if (payload != null && payload.startsWith('advance:')) {
+          ref.read(routerProvider).push(payload.substring('advance:'.length));
         }
       }
     });

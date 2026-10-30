@@ -5,6 +5,7 @@ import 'models/absence.dart';
 import 'models/inscription.dart';
 import 'models/json_utils.dart';
 import 'models/polycopie.dart';
+import 'models/advance.dart';
 import 'models/records.dart';
 import 'models/reference.dart';
 import 'models/schedule.dart';
@@ -187,6 +188,93 @@ class AbsenceRepo {
     final data = await _api.get('/absence/report/level/$levelId',
         query: {'month': month, 'year': year});
     return AbsenceLevelReport.fromJson(Map<String, dynamic>.from(data as Map));
+  }
+}
+
+// ──────────────────── Avances sur salaire des professeurs ───────────────────
+
+class AdvanceRepo {
+  static TeacherAdvance _one(dynamic data) {
+    final d = unwrap(data);
+    if (d is! Map) throw ApiException('Réponse inattendue.');
+    return TeacherAdvance.fromJson(Map<String, dynamic>.from(d));
+  }
+
+  /// Le prof demande une avance sur le mois de paie choisi.
+  static Future<TeacherAdvance> request({
+    required num amount,
+    required int month,
+    required int year,
+    String? reason,
+    int? teacherId,
+  }) async {
+    final data = await _api.post('/teacher-advance', data: {
+      'amount': amount,
+      'month': month,
+      'year': year,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+      if (teacherId != null) 'teacherId': teacherId,
+      'via': 'mobile',
+    });
+    return _one(data);
+  }
+
+  /// Mes demandes (prof connecté).
+  static Future<List<TeacherAdvance>> mine({int? year}) async {
+    final data = await _api.get('/teacher-advance/my', query: {
+      if (year != null) 'year': year,
+    });
+    return asMapList(data).map(TeacherAdvance.fromJson).toList();
+  }
+
+  /// Direction : toutes les demandes (status: pending|approved|rejected|all).
+  static Future<(List<TeacherAdvance>, int)> list({
+    String status = 'pending',
+    int? month,
+    int? year,
+  }) async {
+    final data = await _api.get('/teacher-advance', query: {
+      'status': status,
+      if (month != null) 'month': month,
+      if (year != null) 'year': year,
+    });
+    final rows = asMapList(data).map(TeacherAdvance.fromJson).toList();
+    final pending = data is Map && data['counts'] is Map
+        ? asInt(data['counts']['pending'])
+        : rows.where((a) => a.isPending).length;
+    return (rows, pending);
+  }
+
+  static Future<int> pendingCount() async {
+    final data = await _api.get('/teacher-advance/pending-count');
+    final d = unwrap(data);
+    return d is Map ? asInt(d['pending']) : 0;
+  }
+
+  static Future<TeacherAdvanceDetail> detail(int id) async {
+    final data = await _api.get('/teacher-advance/$id');
+    final d = unwrap(data);
+    if (d is! Map) throw ApiException('Réponse inattendue.');
+    return TeacherAdvanceDetail.fromJson(Map<String, dynamic>.from(d));
+  }
+
+  static Future<TeacherAdvance> approve(int id, {String? note, num? amount}) async {
+    final data = await _api.put('/teacher-advance/$id/approve', data: {
+      if (note != null && note.isNotEmpty) 'note': note,
+      if (amount != null) 'amount': amount,
+    });
+    return _one(data);
+  }
+
+  static Future<TeacherAdvance> reject(int id, {String? note}) async {
+    final data = await _api.put('/teacher-advance/$id/reject', data: {
+      if (note != null && note.isNotEmpty) 'note': note,
+    });
+    return _one(data);
+  }
+
+  static Future<void> cancel(int id) async {
+    await _api.put('/teacher-advance/$id/cancel', data: {});
   }
 }
 

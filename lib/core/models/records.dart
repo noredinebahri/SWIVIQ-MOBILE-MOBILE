@@ -75,9 +75,18 @@ class TeacherPayroll {
     required this.enrollmentStudentCount,
     required this.sessions,
     required this.warnings,
-  });
+    this.advancesTotal = 0,
+    this.advancesCount = 0,
+    num? netTotal,
+  }) : netTotal = netTotal ?? grandTotal;
 
+  /// Total brut, jamais réduit par les avances.
   final num grandTotal;
+  /// Avances sur salaire confirmées sur la période, et net = brut − avances.
+  final num advancesTotal;
+  final int advancesCount;
+  final num netTotal;
+  bool get hasAdvances => advancesTotal > 0;
   final String periodLabel;
   final num hourlyTotal;
   final num totalHours;
@@ -96,8 +105,13 @@ class TeacherPayroll {
         : {};
     final period =
         j['period'] is Map ? Map<String, dynamic>.from(j['period']) : {};
+    final advances =
+        j['advances'] is Map ? Map<String, dynamic>.from(j['advances']) : {};
     return TeacherPayroll(
       grandTotal: asNum(j['grandTotal']),
+      advancesTotal: asNum(advances['total']),
+      advancesCount: asInt(advances['count']),
+      netTotal: asNumOrNull(j['netTotal']),
       periodLabel: period['label']?.toString() ?? '',
       hourlyTotal: asNum(hourly['total']),
       totalHours: asNum(hourly['totalHours']),

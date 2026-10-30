@@ -353,6 +353,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     color: const Color(0xFF0EA5E9),
                     onTap: () => context.push('/polycopie'),
                   ),
+                if (perms?.can('teacher_advance.manage') ??
+                    (user.isAdmin || user.role == 's'))
+                  _QuickAction(
+                    icon: Icons.savings_rounded,
+                    label: 'Avances profs',
+                    color: const Color(0xFFF59E0B),
+                    onTap: () => context.push('/avances'),
+                  ),
                 if (user.isAdmin)
                   _QuickAction(
                     icon: Icons.request_quote_rounded,
