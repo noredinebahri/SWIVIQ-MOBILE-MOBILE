@@ -207,6 +207,8 @@ class AdvanceRepo {
     required int year,
     String? reason,
     int? teacherId,
+    bool approve = false,
+    String? note,
   }) async {
     final data = await _api.post('/teacher-advance', data: {
       'amount': amount,
@@ -214,9 +216,19 @@ class AdvanceRepo {
       'year': year,
       if (reason != null && reason.isNotEmpty) 'reason': reason,
       if (teacherId != null) 'teacherId': teacherId,
+      if (approve) 'approve': true,
+      if (note != null && note.isNotEmpty) 'note': note,
       'via': 'mobile',
     });
     return _one(data);
+  }
+
+  /// Professeurs actifs pour le sélecteur de saisie directe (direction).
+  static Future<List<(int, String)>> teachers() async {
+    final data = await _api.get('/teacher-advance/teachers');
+    return asMapList(data)
+        .map((m) => (asInt(m['id']), m['name']?.toString() ?? 'Professeur'))
+        .toList();
   }
 
   /// Mes demandes (prof connecté).

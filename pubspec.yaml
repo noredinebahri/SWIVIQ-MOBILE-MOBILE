@@ -1,7 +1,7 @@
 name: oxygene_mobile
 description: "Centre Oxygène — application mobile de gestion du centre."
 publish_to: 'none'
-version: 1.5.0+10
+version: 1.5.1+11
 
 environment:
   sdk: ^3.11.5

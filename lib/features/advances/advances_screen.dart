@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -61,6 +62,197 @@ class _AdvancesScreenState extends ConsumerState<AdvancesScreen> {
     }
   }
 
+  static const _monthNames = [
+    'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+    'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+  ];
+
+  /// Saisie directe par la direction / l'assistante, confirmée aussitôt.
+  Future<void> _openNewSheet() async {
+    List<(int, String)> teachers;
+    try {
+      teachers = await AdvanceRepo.teachers();
+    } on ApiException catch (e) {
+      if (mounted) showSnack(context, e.message, error: true);
+      return;
+    }
+    if (!mounted) return;
+    int? teacherId;
+    var month = DateTime.now().month;
+    var year = DateTime.now().year;
+    var approve = true;
+    final amountCtl = TextEditingController();
+    final reasonCtl = TextEditingController();
+    final noteCtl = TextEditingController();
+    final created = await showModalBottomSheet<TeacherAdvance>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          final amount =
+              num.tryParse(amountCtl.text.replaceAll(',', '.').trim()) ?? 0;
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Nouvelle avance',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800)),
+                  Text('Saisie directe par la direction.',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.secondary400)),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<int>(
+                    initialValue: teacherId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Professeur'),
+                    items: [
+                      for (final t in teachers)
+                        DropdownMenuItem(value: t.$1, child: Text(t.$2)),
+                    ],
+                    onChanged: (v) => setSheetState(() => teacherId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: amountCtl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))
+                    ],
+                    style: const TextStyle(
+                        fontSize: 30, fontWeight: FontWeight.w800),
+                    decoration: const InputDecoration(
+                        labelText: 'Montant', suffixText: 'DH', hintText: '0'),
+                    onChanged: (_) => setSheetState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      flex: 3,
+                      child: DropdownButtonFormField<int>(
+                        initialValue: month,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                            labelText: 'Mois de paie', isDense: true),
+                        items: [
+                          for (var m = 1; m <= 12; m++)
+                            DropdownMenuItem(
+                                value: m, child: Text(_monthNames[m - 1])),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setSheetState(() => month = v);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<int>(
+                        initialValue: year,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                            labelText: 'Année', isDense: true),
+                        items: [
+                          for (var y = DateTime.now().year - 1;
+                              y <= DateTime.now().year + 1;
+                              y++)
+                            DropdownMenuItem(value: y, child: Text('$y')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setSheetState(() => year = v);
+                        },
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reasonCtl,
+                    maxLength: 255,
+                    decoration: const InputDecoration(
+                        labelText: 'Motif (facultatif)', counterText: ''),
+                  ),
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Confirmer immédiatement',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: const Text(
+                        'Retenue sur la paie du mois, le professeur est prévenu.'),
+                    value: approve,
+                    onChanged: (v) => setSheetState(() => approve = v),
+                  ),
+                  if (approve)
+                    TextField(
+                      controller: noteCtl,
+                      maxLength: 255,
+                      decoration: const InputDecoration(
+                          labelText: 'Note pour le professeur (facultatif)',
+                          counterText: ''),
+                    ),
+                  const SizedBox(height: 14),
+                  BusyButton(
+                    icon: Icon(approve ? Icons.check_rounded : Icons.send_rounded),
+                    style: approve
+                        ? FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF16A34A))
+                        : null,
+                    onPressed: amount <= 0 || teacherId == null
+                        ? null
+                        : () async {
+                            try {
+                              final a = await AdvanceRepo.request(
+                                amount: amount,
+                                month: month,
+                                year: year,
+                                reason: reasonCtl.text.trim(),
+                                teacherId: teacherId,
+                                approve: approve,
+                                note: noteCtl.text.trim(),
+                              );
+                              if (sheetContext.mounted) {
+                                Navigator.pop(sheetContext, a);
+                              }
+                            } on ApiException catch (e) {
+                              if (sheetContext.mounted) {
+                                showSnack(sheetContext, e.message, error: true);
+                              }
+                            }
+                          },
+                    child: Text(approve
+                        ? 'Enregistrer et confirmer · ${fmtMoney(amount)} DH'
+                        : 'Enregistrer la demande'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (created != null && mounted) {
+      showSnack(
+          context,
+          created.isApproved
+              ? 'Avance enregistrée et confirmée.'
+              : 'Demande enregistrée.');
+      setState(() => _tab = created.isApproved ? 'approved' : 'pending');
+      _load();
+    }
+  }
+
   Future<void> _open(TeacherAdvance a) async {
     final changed = await context.push<bool>('/avances/${a.id}');
     if (changed == true) _load();
@@ -72,6 +264,14 @@ class _AdvancesScreenState extends ConsumerState<AdvancesScreen> {
     final total = _rows.fold<num>(0, (s, a) => s + a.amount);
     return Scaffold(
       appBar: AppBar(title: const Text('Avances sur salaire')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openNewSheet,
+        backgroundColor: _amber,
+        foregroundColor: const Color(0xFF1F1300),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Nouvelle avance',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
       body: Column(
         children: [
           Padding(
@@ -120,7 +320,7 @@ class _AdvancesScreenState extends ConsumerState<AdvancesScreen> {
                               ])
                             : ListView(
                                 padding:
-                                    const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                                    const EdgeInsets.fromLTRB(16, 8, 16, 96),
                                 children: [
                                   Padding(
                                     padding:
