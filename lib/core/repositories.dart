@@ -4,6 +4,7 @@ import 'api/api_client.dart';
 import 'models/absence.dart';
 import 'models/inscription.dart';
 import 'models/json_utils.dart';
+import 'models/my_session.dart';
 import 'models/polycopie.dart';
 import 'models/advance.dart';
 import 'models/records.dart';
@@ -118,6 +119,15 @@ class ScheduleRepo {
 // ──────────────────────────────── Absences ──────────────────────────────────
 
 class AbsenceRepo {
+  /// Séances du professeur connecté pour un jour (emploi du temps en vigueur).
+  static Future<(List<MySession>, String?)> mySessions(String dateYmd) async {
+    final data = await _api.get('/absence/my-sessions', query: {'date': dateYmd});
+    final d = unwrap(data);
+    if (d is! Map) return (<MySession>[], null);
+    final list = asMapList(d['sessions']).map(MySession.fromJson).toList();
+    return (list, asStringOrNull(d['notice']));
+  }
+
   /// day = -1 → tout le mois.
   static Future<List<AbsenceEntry>> byLevel(
       int levelId, int month, int year, int day) async {

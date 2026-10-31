@@ -9,6 +9,7 @@ import '../../core/api/api_client.dart';
 import '../../core/auth/auth_providers.dart';
 import '../../core/models/absence.dart';
 import '../../core/models/json_utils.dart';
+import '../../core/models/my_session.dart';
 import '../../core/repositories.dart';
 import '../../core/widgets/common.dart';
 
@@ -142,6 +143,13 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
   /// 'levelId|group' déjà chargé (évite de recharger au changement de jour).
   String? _loadedKey;
 
+  // ── Professeur : pointage sur UNE de ses séances du jour ──
+  bool get _isTeacher => ref.read(authProvider).user?.isTeacher ?? false;
+  List<MySession> _mySessions = [];
+  bool _sessionsLoading = false;
+  String? _sessionsNotice;
+  int? _selectedSlotId;
+
   @override
   void initState() {
     super.initState();
@@ -149,6 +157,209 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
     _month = now.month;
     _year = now.year;
     _selectedDay = now.day;
+    if (_isTeacher) _loadSessions();
+  }
+
+  Future<void> _loadSessions({bool autoPick = true}) async {
+    if (!_isTeacher || _selectedDay <= 0) return;
+    setState(() => _sessionsLoading = true);
+    try {
+      final (list, notice) = await AbsenceRepo.mySessions(_dateYmd);
+      if (!mounted) return;
+      setState(() {
+        _mySessions = list;
+        _sessionsNotice = notice;
+        _sessionsLoading = false;
+      });
+      if (!autoPick) return;
+      MySession? pick;
+      for (final s in list) {
+        if (s.isNow) pick = s;
+      }
+      pick ??= list.length == 1 ? list.first : null;
+      if (pick != null) {
+        _selectSession(pick);
+      } else {
+        setState(() {
+          _selectedSlotId = null;
+          _targetLevelIds = [];
+          _students = [];
+          _loadedKey = null;
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _mySessions = [];
+        _sessionsLoading = false;
+      });
+    }
+  }
+
+  /// Verrouille niveau supérieur, branches, groupe et matière sur la séance.
+  void _selectSession(MySession s) {
+    final maters = ref.read(matersProvider).valueOrNull ?? [];
+    int? materId = s.matterId;
+    String? materName = s.matterName;
+    if (materId == null) {
+      final want = s.subject.toLowerCase().trim();
+      for (final m in maters) {
+        final have = m.name.toLowerCase();
+        if (want.isNotEmpty && (have == want || have.contains(want) || want.contains(have))) {
+          materId = m.id;
+          materName = m.name;
+          break;
+        }
+      }
+    }
+    setState(() {
+      _selectedSlotId = s.slotId;
+      _targetLevelIds = s.levelIds.isNotEmpty
+          ? List<int>.from(s.levelIds)
+          : [if (s.levelId != null) s.levelId!];
+      _levelName = s.levelName;
+      _group = s.groupIndex ?? 0;
+      _materId = materId;
+      _materName = materName ?? s.subject;
+      _students = [];
+      _loadedKey = null;
+    });
+    if (_targetLevelIds.isNotEmpty) _loadData();
+  }
+
+  Widget _sessionsBlock() {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.event_note_rounded,
+              size: 18, color: AppColors.primary600),
+          const SizedBox(width: 8),
+          Text('Mes séances du jour',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+          const Spacer(),
+          if (_sessionsLoading)
+            const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+        ]),
+        const SizedBox(height: 8),
+        if (_selectedDay <= 0)
+          Text('Choisissez un jour pour voir vos séances.',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: AppColors.secondary400))
+        else if (!_sessionsLoading && _mySessions.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBEB),
+              border: Border.all(color: const Color(0xFFFDE68A)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _sessionsNotice ??
+                  'Aucune séance dans votre emploi du temps ce jour. Le pointage se fait sur vos séances : vérifiez la date ou voyez la direction.',
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
+            ),
+          )
+        else
+          SizedBox(
+            height: 92,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _mySessions.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final s = _mySessions[i];
+                final on = s.slotId == _selectedSlotId;
+                return InkWell(
+                  onTap: () => _selectSession(s),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    width: 190,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: on ? const Color(0xFF111827) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: on
+                            ? const Color(0xFF111827)
+                            : s.isNow
+                                ? AppColors.success600
+                                : AppColors.secondary200,
+                        width: 1.4,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(children: [
+                          Text('${s.startTime} → ${s.endTime}',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: on
+                                      ? Colors.white70
+                                      : AppColors.secondary400)),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: on
+                                  ? Colors.white24
+                                  : s.isNow
+                                      ? AppColors.success100
+                                      : AppColors.secondary100,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(s.statusLabel,
+                                style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: on
+                                        ? Colors.white
+                                        : s.isNow
+                                            ? AppColors.success600
+                                            : AppColors.secondary500)),
+                          ),
+                        ]),
+                        const SizedBox(height: 3),
+                        Text(s.levelName ?? '—',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13.5,
+                                color: on ? Colors.white : null)),
+                        Text(
+                          [
+                            s.matterName ?? s.subject,
+                            if (s.group != null) 'Groupe ${s.group}',
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: on
+                                  ? Colors.white70
+                                  : AppColors.secondary600),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
+    );
   }
 
   int get _daysInMonth => DateTime(_year, _month + 1, 0).day;
@@ -514,7 +725,11 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
         _selectedDay = -1;
       }
     });
-    _loadData();
+    if (_isTeacher && _selectedDay > 0) {
+      _loadSessions();
+    } else {
+      _loadData();
+    }
   }
 
   /// Sélecteur PAR NIVEAU SUPÉRIEUR uniquement (comme /absence/list-level du
@@ -684,6 +899,7 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
+            if (_isTeacher) _sessionsBlock() else ...[
             Row(
               children: [
                 Expanded(
@@ -779,6 +995,7 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
                 ),
               ],
             ),
+            ],
             const SizedBox(height: 8),
             Row(
               children: [
@@ -843,7 +1060,11 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
                             : null,
                         onSelected: (_) {
                           setState(() => _selectedDay = d);
-                          _loadData();
+                          if (_isTeacher) {
+                            _loadSessions();
+                          } else {
+                            _loadData();
+                          }
                         },
                       ),
                     ),
@@ -858,6 +1079,14 @@ class _AbsenceScreenState extends ConsumerState<AbsenceScreen> {
 
   Widget _buildBody(bool canEdit) {
     if (_targetLevelIds.isEmpty) {
+      if (_isTeacher) {
+        return const EmptyState(
+          icon: Icons.event_note_rounded,
+          title: 'Choisissez une de vos séances',
+          subtitle:
+              'Le niveau, le groupe et la matière viennent de votre emploi du temps : plus rien à choisir à la main.',
+        );
+      }
       return const EmptyState(
         icon: Icons.school_rounded,
         title: 'Sélectionnez un niveau supérieur pour commencer',
